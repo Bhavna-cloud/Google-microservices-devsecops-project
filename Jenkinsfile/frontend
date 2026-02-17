@@ -7,7 +7,7 @@ pipeline {
 
     environment {
         DOCKER_NAME = 'harishnshetty/frontend'
-        IMAGE_NAME = 'frontend'
+        IMAGE_NAME  = 'frontend'
     }
 
     stages {
@@ -25,7 +25,7 @@ pipeline {
             }
         }
 
-        // ------------------ SAST (gosec) ------------------
+        // ---------------- SAST ----------------
 
         stage('Go Security Scan (gosec)') {
             steps {
@@ -34,11 +34,9 @@ pipeline {
                         export PATH="$PATH:$(go env GOPATH)/bin"
 
                         if ! command -v gosec &> /dev/null; then
-                            echo "Installing gosec..."
                             go install github.com/securego/gosec/v2/cmd/gosec@latest
                         fi
 
-                        echo "Running gosec..."
                         gosec -fmt=sonarqube -out gosec-report.json -no-fail ./...
                     '''
                 }
@@ -50,23 +48,23 @@ pipeline {
             }
         }
 
-        // ------------------ SONAR ANALYSIS ------------------
+        // ---------------- SONAR (Docker Scanner) ----------------
 
         stage("SonarQube Analysis") {
             steps {
                 dir('src/frontend') {
                     withSonarQubeEnv('sonar-server') {
-                        script {
-                            def scannerHome = tool 'sonar-scanner'
-
-                            sh """
-                                ${scannerHome}/bin/sonar-scanner \
-                                -Dsonar.projectName=frontend \
-                                -Dsonar.projectKey=frontend \
-                                -Dsonar.sources=. \
-                                -Dsonar.go.gosec.reportPaths=gosec-report.json
-                            """
-                        }
+                        sh """
+                            docker run --rm \
+                              -e SONAR_HOST_URL=$SONAR_HOST_URL \
+                              -e SONAR_AUTH_TOKEN=$SONAR_AUTH_TOKEN \
+                              -v \$PWD:/usr/src \
+                              sonarsource/sonar-scanner-cli \
+                              -Dsonar.projectName=frontend \
+                              -Dsonar.projectKey=frontend \
+                              -Dsonar.sources=. \
+                              -Dsonar.go.gosec.reportPaths=gosec-report.json
+                        """
                     }
                 }
             }
@@ -80,13 +78,12 @@ pipeline {
             }
         }
 
-        // ------------------ BUILD ------------------
+        // ---------------- BUILD ----------------
 
         stage('Go Build') {
             steps {
                 dir('src/frontend') {
                     sh '''
-                        echo "Building application..."
                         CGO_ENABLED=0 go build -o app .
                     '''
                 }
@@ -97,14 +94,13 @@ pipeline {
             steps {
                 dir('src/frontend') {
                     sh '''
-                        echo "Running unit tests..."
                         go test -v -coverprofile=coverage.out ./...
                     '''
                 }
             }
         }
 
-        // ------------------ SCA ------------------
+        // ---------------- SCA ----------------
 
         stage('Dependency Check (govulncheck)') {
             steps {
@@ -113,7 +109,6 @@ pipeline {
                         export PATH="$PATH:$(go env GOPATH)/bin"
 
                         if ! command -v govulncheck &> /dev/null; then
-                            echo "Installing govulncheck..."
                             go install golang.org/x/vuln/cmd/govulncheck@latest
                         fi
 
@@ -123,16 +118,16 @@ pipeline {
             }
         }
 
-        // ------------------ TRIVY FS SCAN ------------------
+        // ---------------- TRIVY FS ----------------
 
         stage("Trivy File Scan") {
             steps {
                 dir('src/frontend') {
                     sh '''
                         trivy fs . \
-                            --severity CRITICAL,HIGH \
-                            --scanners vuln,misconfig,secret \
-                            > trivy-fs-report.txt || true
+                          --severity CRITICAL,HIGH \
+                          --scanners vuln,misconfig,secret \
+                          > trivy-fs-report.txt || true
                     '''
                 }
             }
@@ -143,7 +138,7 @@ pipeline {
             }
         }
 
-        // ------------------ DOCKER BUILD ------------------
+        // ---------------- DOCKER BUILD ----------------
 
         stage("Build Docker Image") {
             steps {
@@ -174,7 +169,7 @@ pipeline {
             }
         }
 
-        // ------------------ TRIVY IMAGE SCAN ------------------
+        // ---------------- TRIVY IMAGE ----------------
 
         stage("Trivy Scan Image") {
             steps {
@@ -191,7 +186,7 @@ pipeline {
         }
     }
 
-    // ------------------ EMAIL NOTIFICATION ------------------
+    // ---------------- EMAIL ----------------
 
     post {
         always {
